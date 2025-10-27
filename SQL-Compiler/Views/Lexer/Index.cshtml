@@ -1,0 +1,249 @@
+@{
+    ViewData["Title"] = "SQL Compiler - Lexical Analyzer";
+}
+
+<div class="page-content">
+    <div class="card">
+        <div class="card-header d-flex align-items-center">
+            <h1 class="h4 mb-0">SQL Lexical Analyzer</h1>
+        </div>
+        
+        <div class="card-body">
+            <div class="row g-4">
+                <div class="col-lg-6">
+                    <div class="mb-4">
+                        <label for="inputCode" class="form-label">SQL Input</label>
+                        <textarea id="inputCode" class="form-control code-box" rows="10" placeholder="Enter your SQL code here..."></textarea>
+                        <div class="form-text">Type or paste SQL code to analyze its tokens</div>
+                    </div>
+
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button id="analyzeBtn" class="btn btn-primary">
+                            <i class="bi bi-lightning-fill me-2"></i>Analyze
+                        </button>
+                        <button id="uploadBtn" class="btn btn-outline-primary" title="Upload .txt file">
+                            <i class="bi bi-upload me-2"></i>Upload File
+                        </button>
+                        <input type="file" id="fileInput" accept=".txt,text/plain" class="d-none" />
+                        <button id="exampleBtn" class="btn btn-outline-primary">
+                            <i class="bi bi-lightbulb me-2"></i>Load Example
+                        </button>
+                        <button id="clearBtn" class="btn btn-outline-secondary">
+                            <i class="bi bi-trash me-2"></i>Clear
+                        </button>
+                        <div id="analyzeSpinner" class="spinner-border text-primary ms-2 align-self-center d-none">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+
+                    <div id="errorBox" class="alert alert-danger mt-4 d-none"></div>
+                </div>
+
+                <div class="col-lg-6">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <h2 class="h5 mb-0">Token Analysis</h2>
+                        <button id="downloadBtn" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-download me-2"></i>Download CSV
+                        </button>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="input-group">
+                            <span class="input-group-text">
+                                <i class="bi bi-search"></i>
+                            </span>
+                            <input id="filterInput" class="form-control" placeholder="Filter tokens..." />
+                        </div>
+                    </div>
+
+                    <div id="resultSection" class="d-none">
+                        <div class="table-responsive mb-4">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Token Type</th>
+                                        <th>Lexeme</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tokenTableBody"></tbody>
+                            </table>
+                        </div>
+
+                        <div class="token-summary">
+                            <h3 class="h6 mb-3">Token Overview</h3>
+                            <div id="tokenBadgeContainer" class="token-badges"></div>
+                        </div>
+                    </div>
+
+                    <div id="emptyState" class="text-center py-5">
+                        <div class="empty-state-icon mb-3">
+                            <i class="bi bi-code-square text-muted" style="font-size: 2rem;"></i>
+                        </div>
+                        <h3 class="h6 mb-2">No Tokens Found</h3>
+                        <p class="text-muted mb-0">Enter SQL code and click Analyze to see tokens</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <script>
+        const el = id => document.getElementById(id);
+    const analyzeBtn = el('analyzeBtn');
+    const clearBtn = el('clearBtn');
+    const exampleBtn = el('exampleBtn');
+        const spinner = el('analyzeSpinner');
+        const errorBox = el('errorBox');
+        const resultSection = el('resultSection');
+        const emptyState = el('emptyState');
+        const tableBody = el('tokenTableBody');
+        const badgeContainer = el('tokenBadgeContainer');
+        const filterInput = el('filterInput');
+
+        function setLoading(isLoading) {
+            if (isLoading) {
+                analyzeBtn.disabled = true;
+                spinner.classList.remove('d-none');
+            } else {
+                analyzeBtn.disabled = false;
+                spinner.classList.add('d-none');
+            }
+        }
+
+        function clearResults() {
+            tableBody.innerHTML = '';
+            badgeContainer.innerHTML = '';
+            resultSection.classList.add('d-none');
+            emptyState.classList.remove('d-none');
+        }
+
+        function mapBadgeClass(type) {
+            const t = (type || '').toLowerCase();
+            if (t.includes('keyword')) return 'badge bg-primary';
+            if (t.includes('identifier')) return 'badge bg-info text-dark';
+            if (t.includes('number') || t.includes('int') || t.includes('float')) return 'badge bg-warning text-dark';
+            if (t.includes('string')) return 'badge bg-success';
+            if (t.includes('operator') || t.includes('symbol')) return 'badge bg-secondary';
+            if (t.includes('punctuation')) return 'badge bg-dark';
+            return 'badge bg-light text-dark border';
+        }
+
+        analyzeBtn.addEventListener('click', async () => {
+            const input = el('inputCode').value.trim();
+            errorBox.classList.add('d-none');
+            clearResults();
+
+            if (!input) {
+                errorBox.textContent = 'Please enter SQL-like code.';
+                errorBox.classList.remove('d-none');
+                return;
+            }
+
+            setLoading(true);
+
+            try {
+                const response = await fetch('/Lexer/Analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(input)
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    errorBox.textContent = errorText || 'Server error';
+                    errorBox.classList.remove('d-none');
+                    setLoading(false);
+                    return;
+                }
+
+                const tokens = await response.json();
+                if (!tokens || tokens.length === 0) {
+                    errorBox.textContent = 'No tokens returned.';
+                    errorBox.classList.remove('d-none');
+                    setLoading(false);
+                    return;
+                }
+
+                emptyState.classList.add('d-none');
+                resultSection.classList.remove('d-none');
+
+                tokens.forEach(token => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td><small class="text-muted">${token.type}</small></td><td>${escapeHtml(token.lexeme)}</td>`;
+                    tableBody.appendChild(tr);
+
+                    const span = document.createElement('span');
+                    span.className = mapBadgeClass(token.type) + ' py-1 px-2';
+                    span.textContent = `${token.type}: ${token.lexeme}`;
+                    badgeContainer.appendChild(span);
+                });
+
+                setLoading(false);
+                window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            } catch (err) {
+                errorBox.textContent = 'An error occurred. Please try again.';
+                errorBox.classList.remove('d-none');
+                setLoading(false);
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            el('inputCode').value = '';
+            clearResults();
+        });
+
+        exampleBtn.addEventListener('click', () => {
+            el('inputCode').value = "CREATE TABLE students (id INT, name TEXT);\nINSERT INTO students VALUES (1, 'Sherif');\nSELECT name FROM students WHERE id = 1;";
+            analyzeBtn.click();
+        });
+
+        const fileInputCtrl = el('fileInput');
+        const uploadBtn = el('uploadBtn');
+        uploadBtn.addEventListener('click', () => fileInputCtrl.click());
+        fileInputCtrl.addEventListener('change', async (ev) => {
+            const f = fileInputCtrl.files && fileInputCtrl.files[0];
+            if (!f) return;
+            const name = f.name || '';
+            if (!name.toLowerCase().endsWith('.txt') && f.type !== 'text/plain') {
+                errorBox.textContent = 'Please select a .txt file.';
+                errorBox.classList.remove('d-none');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+                const text = reader.result || '';
+                el('inputCode').value = text;
+                analyzeBtn.click();
+            };
+            reader.onerror = () => {
+                errorBox.textContent = 'Failed to read the file.';
+                errorBox.classList.remove('d-none');
+            };
+            reader.readAsText(f, 'UTF-8');
+            fileInputCtrl.value = '';
+        });
+
+        filterInput.addEventListener('input', () => {
+            const q = filterInput.value.trim().toLowerCase();
+            Array.from(tableBody.children).forEach(row => {
+                const t = row.children[0].textContent.toLowerCase();
+                const l = row.children[1].textContent.toLowerCase();
+                row.style.display = (t.includes(q) || l.includes(q)) ? '' : 'none';
+            });
+        });
+
+        el('downloadBtn').addEventListener('click', () => {
+            const rows = Array.from(tableBody.children).map(r => {
+                return [r.children[0].textContent, r.children[1].textContent].map(s => '"' + s.replace(/"/g,'""') + '"').join(',');
+            });
+            if (rows.length === 0) return;
+            const csv = ['"Type","Lexeme"', ...rows].join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = 'tokens.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        });
+
+        function escapeHtml(text) { return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+    </script>
