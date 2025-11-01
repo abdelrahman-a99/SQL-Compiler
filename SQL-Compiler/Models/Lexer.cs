@@ -3,7 +3,6 @@ using System.Collections.Generic;
 
 namespace SQL_Compiler.Models
 {
-    // ✅ Renamed to SqlToken to avoid namespace ambiguity
     public class SqlToken
     {
         public string Type { get; set; } = string.Empty;
@@ -14,16 +13,22 @@ namespace SQL_Compiler.Models
 
     public class Lexer
     {
-        // Define SQL keywords and types
+        // ======================  SPECIFICATIONS  ======================
+
+        // Case-sensitive
+        // Keywords (كل واحدة بتطلع باسمها هي نفسها)
         private readonly HashSet<string> _keywords = new()
         {
-            "CREATE", "TABLE", "INSERT", "INTO", "VALUES",
-            "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "UPDATE", "SET", "DELETE"
+            "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES",
+            "UPDATE", "SET", "DELETE", "CREATE", "TABLE",
+            "AND", "OR", "NOT"
         };
 
+        // Data types (تفضل TYPE)
         private readonly HashSet<string> _types = new() { "INT", "FLOAT", "TEXT" };
+
+        // Delimiters
         private readonly HashSet<char> _delimiters = new() { '(', ')', ',', ';' };
-        private readonly HashSet<char> _operators = new() { '=', '>', '<', '+', '-', '*', '/' };
 
         public List<SqlToken> Analyze(string code)
         {
@@ -36,7 +41,7 @@ namespace SQL_Compiler.Models
             {
                 char c = code[i];
 
-                // Skip whitespace
+                // ---------- Skip Whitespace ----------
                 if (char.IsWhiteSpace(c))
                 {
                     if (c == '\n') { line++; col = 1; }
@@ -45,33 +50,51 @@ namespace SQL_Compiler.Models
                     continue;
                 }
 
-                // Comments (--) or (#...#)
+                // ---------- Comments ----------
                 if (c == '-' && i + 1 < code.Length && code[i + 1] == '-')
                 {
                     while (i < code.Length && code[i] != '\n') { i++; }
                     continue;
                 }
+
                 if (c == '#')
                 {
-                    i++;
-                    while (i < code.Length && code[i] != '#') { i++; }
-                    if (i < code.Length) i++;
+                    int startLine = line, startCol = col;
+                    i++; col++;
+                    bool closed = false;
+                    while (i < code.Length)
+                    {
+                        if (code[i] == '#') { closed = true; i++; col++; break; }
+                        if (code[i] == '\n') { line++; col = 1; i++; continue; }
+                        i++; col++;
+                    }
+                    if (!closed)
+                    {
+                        tokens.Add(new SqlToken
+                        {
+                            Type = "ERROR",
+                            Lexeme = $"Unclosed comment starting at line {startLine}, column {startCol}",
+                            Line = startLine,
+                            Column = startCol
+                        });
+                    }
                     continue;
                 }
 
-                // Identifiers, keywords, or types
+                // ---------- Identifiers / Keywords / Types ----------
                 if (char.IsLetter(c))
                 {
                     int start = i, startCol = col;
                     while (i < code.Length && (char.IsLetterOrDigit(code[i]) || code[i] == '_'))
-                    { i++; col++; }
+                    {
+                        i++; col++;
+                    }
 
                     string word = code.Substring(start, i - start);
-                    string upper = word.ToUpper();
 
-                    if (_keywords.Contains(upper))
-                        tokens.Add(new SqlToken { Type = upper, Lexeme = word, Line = line, Column = startCol });
-                    else if (_types.Contains(upper))
+                    if (_keywords.Contains(word))
+                        tokens.Add(new SqlToken { Type = word.ToUpper(), Lexeme = word, Line = line, Column = startCol });
+                    else if (_types.Contains(word))
                         tokens.Add(new SqlToken { Type = "TYPE", Lexeme = word, Line = line, Column = startCol });
                     else
                         tokens.Add(new SqlToken { Type = "IDENTIFIER", Lexeme = word, Line = line, Column = startCol });
@@ -79,38 +102,130 @@ namespace SQL_Compiler.Models
                     continue;
                 }
 
-                // Numbers
+                // ---------- Numbers ----------
                 if (char.IsDigit(c))
                 {
                     int start = i, startCol = col;
-                    while (i < code.Length && char.IsDigit(code[i])) { i++; col++; }
+                    while (i < code.Length && (char.IsDigit(code[i]) || code[i] == '.'))
+                    { i++; col++; }
+
                     string num = code.Substring(start, i - start);
                     tokens.Add(new SqlToken { Type = "NUMBER", Lexeme = num, Line = line, Column = startCol });
                     continue;
                 }
 
-                // Strings (single quotes)
+                // ---------- Strings ----------
                 if (c == '\'')
                 {
                     int startCol = col;
+                    int startLine = line;
                     i++; col++;
                     int start = i;
-                    while (i < code.Length && code[i] != '\'') { i++; col++; }
+                    while (i < code.Length && code[i] != '\'')
+                    {
+                        if (code[i] == '\n') { line++; col = 1; }
+                        i++; col++;
+                    }
+
+                    if (i >= code.Length)
+                    {
+                        tokens.Add(new SqlToken
+                        {
+                            Type = "ERROR",
+                            Lexeme = $"Unclosed string starting at line {startLine}, column {startCol}",
+                            Line = startLine,
+                            Column = startCol
+                        });
+                        break;
+                    }
+
                     string str = code.Substring(start, i - start);
                     tokens.Add(new SqlToken { Type = "STRING", Lexeme = $"'{str}'", Line = line, Column = startCol });
-                    if (i < code.Length && code[i] == '\'') { i++; col++; }
-                    continue;
-                }
-
-                // Operators
-                if (_operators.Contains(c))
-                {
-                    tokens.Add(new SqlToken { Type = "OPERATOR", Lexeme = c.ToString(), Line = line, Column = col });
                     i++; col++;
                     continue;
                 }
 
-                // Delimiters
+                // ---------- Operators ----------
+                string opType = "";
+                string opLexeme = c.ToString();
+
+                switch (c)
+                {
+                    case '=':
+                        opType = "EQUAL";
+                        break;
+
+                    case '>':
+                        if (i + 1 < code.Length && code[i + 1] == '=')
+                        {
+                            opType = "GREATER_EQUAL";
+                            opLexeme = ">=";
+                            i++;
+                            col++;
+                        }
+                        else opType = "GREATER_THAN";
+                        break;
+
+                    case '<':
+                        if (i + 1 < code.Length && code[i + 1] == '=')
+                        {
+                            opType = "LESS_EQUAL";
+                            opLexeme = "<=";
+                            i++;
+                            col++;
+                        }
+                        else if (i + 1 < code.Length && code[i + 1] == '>')
+                        {
+                            opType = "NOT_EQUAL";
+                            opLexeme = "<>";
+                            i++;
+                            col++;
+                        }
+                        else opType = "LESS_THAN";
+                        break;
+
+                    case '!':
+                        if (i + 1 < code.Length && code[i + 1] == '=')
+                        {
+                            opType = "NOT_EQUAL";
+                            opLexeme = "!=";
+                            i++;
+                            col++;
+                        }
+                        break;
+
+                    case '+':
+                        opType = "PLUS";
+                        break;
+
+                    case '-':
+                        opType = "MINUS";
+                        break;
+
+                    case '*':
+                        opType = "MULTIPLY";
+                        break;
+
+                    case '/':
+                        opType = "DIVIDE";
+                        break;
+                }
+
+                if (!string.IsNullOrEmpty(opType))
+                {
+                    tokens.Add(new SqlToken
+                    {
+                        Type = opType,
+                        Lexeme = opLexeme,
+                        Line = line,
+                        Column = col
+                    });
+                    i++;
+                    col++;
+                    continue;
+                }
+
+                // ---------- Delimiters ----------
                 if (_delimiters.Contains(c))
                 {
                     string type = c switch
@@ -127,8 +242,13 @@ namespace SQL_Compiler.Models
                     continue;
                 }
 
-                // Invalid character
-                tokens.Add(new SqlToken { Type = "ERROR", Lexeme = $"Invalid char '{c}'", Line = line, Column = col });
+                tokens.Add(new SqlToken
+                {
+                    Type = "ERROR",
+                    Lexeme = $"Invalid character '{c}' at line {line}, column {col}",
+                    Line = line,
+                    Column = col
+                });
                 i++; col++;
             }
 
